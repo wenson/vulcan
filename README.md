@@ -1,6 +1,6 @@
 Vulcan Spider
 ======
-a dynamic spider framework based on gevent and multi-threads,support webkit engine for dom parsing.
+A dynamic spider framework based on gevent and multi-threads,support webkit engine for dom parsing.
 
 基于gevent和多线程模型，支持WebKit引擎的动态爬虫框架。
 
@@ -26,12 +26,6 @@ a dynamic spider framework based on gevent and multi-threads,support webkit engi
 * chardet 2.2.1
 
 
-### 示例
-
-    spider = Spider(concurrent_num=20,depth=3,max_url_num=300,crawler_mode=0)
-    spider.feed_url("http://www.pnigos.com/")
-    spider.start()
-
 ### 说明
 
 1. 框架由两部分组成：
@@ -55,10 +49,19 @@ fetcher和crawler两部分独立工作，互不干扰，通过queue进行链接�
 * same_origin       : 是否限制相同域下
 
 
+### 示例
+
+    spider = Spider(concurrent_num=20,depth=3,max_url_num=300,crawler_mode=0)
+    spider.feed_url("http://www.baidu.com/")
+    spider.start()
+
+![image](https://raw2.github.com/pnigos/vulcan/master/screenshot/screenshot.png)
+
+
 ### TODO
 
 * URL拆分成独立部分存储(pagename,params,fragments,post data)
-* webkit 支持
+* WebKit 支持
 * 相似URL合并
 * 这只是一个框架，保证了框架运行的稳定性，更多扩展就留给各位有缘人吧。
 
