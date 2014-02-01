@@ -60,6 +60,7 @@ fetcher和crawler两部分独立工作，互不干扰，通过queue进行链接�
 * URL拆分成独立部分存储(pagename,params,fragments,post data)
 * webkit 支持
 * 相似URL合并
+* 这只是一个框架，保证了框架运行的稳定性，更多扩展就留给各位有缘人吧。
 
 
 ### LICENSE
