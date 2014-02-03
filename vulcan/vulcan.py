@@ -22,11 +22,11 @@ from gevent import pool
 from gevent import queue
 from gevent import event
 from gevent import Timeout
+from gevent import threadpool
 
 from lxml import etree
 from exceptions import *
 
-import threadpool
 monkey.patch_all()
 import time
 import uuid
@@ -39,8 +39,7 @@ import random
 import lxml.html as H
 import chardet
 
-from Data import UrlCache
-from Data import UrlData
+from Data import UrlCache,UrlData
 
 class HtmlAnalyzer(object):
     '''页面分析类'''
@@ -184,16 +183,8 @@ class Spider(object):
         '''
         启动爬取器
         '''
-        if self.crawler_mode == 0:
-            '''多线程模型'''
-            reqs = threadpool.makeRequests(self.crawler,xrange(self.concurrent_num))
-            for req in reqs:
-                self.crawler_pool.putRequest(req)
-            self.crawler_pool.wait()
-        else:
-            '''Gevent模型'''
-            for j in xrange(self.concurrent_num):
-                self.crawler_pool.spawn(self.crawler)
+        for _ in xrange(self.concurrent_num):
+            self.crawler_pool.spawn(self.crawler)
 
     def start(self):
         '''
@@ -215,12 +206,15 @@ class Spider(object):
             self.fetcher_pool.join(timeout=self.internal_timer)
             if self.crawler_mode == 1:
                 self.crawler_pool.join(timeout=self.internal_timer)
+            else:
+                self.crawler_pool.join()
         except Timeout:
             self.logger.error("internal timeout triggered")
         finally:
             self.internal_timer.cancel()
             
         self.stopped.clear()
+        self.logger.info("crawler_cache:%s fetcher_cache:%s" % (len(self.crawler_cache),len(self.fetcher_cache)))
         self.logger.info("spider process quit.")
     
     def crawler(self,_dep=None):
@@ -235,7 +229,8 @@ class Spider(object):
                 if self.crawler_queue.unfinished_tasks == 0 and self.fetcher_queue.unfinished_tasks == 0:
                     self.stop()
                 else:
-                    gevent.sleep()
+                    if self.crawler_mode == 1:
+                        gevent.sleep()
             else:
                 pre_depth = url_data.depth
                 curr_depth = pre_depth+1
@@ -329,6 +324,6 @@ class Spider(object):
         return url_origin == self.origin
 
 if __name__ == '__main__':
-    spider = Spider(concurrent_num=20,depth=3,max_url_num=300,crawler_mode=0)
+    spider = Spider(concurrent_num=10,depth=3,max_url_num=300,crawler_mode=0)
     spider.feed_url("http://www.freebuf.com/")
     spider.start()
