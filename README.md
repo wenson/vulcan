@@ -19,9 +19,8 @@ A dynamic spider framework based on gevent and multi-threads,support webkit engi
 
 ### 依赖
 
-* python 2.7
-* gevent 1.0dev
-* threadpool (多线程模型使用)
+* python 2.7+
+* gevent 1.0
 * lxml 2.3
 * chardet 2.2.1
 
