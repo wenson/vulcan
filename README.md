@@ -29,7 +29,7 @@ A dynamic spider framework based on gevent and multi-threads,support webkit engi
 
 ### 说明
 
-1. 框架由两部分组成：
+1, 框架由两部分组成：
 
 >
 * fetcher:下载器，负责获取HTML，送入crawler。
@@ -37,7 +37,7 @@ A dynamic spider framework based on gevent and multi-threads,support webkit engi
 
 fetcher和crawler两部分独立工作，互不干扰，通过queue进行链接。fetcher需要发送HTTP请求，涉及到阻塞操作，使用gevent池控制。crawler没有涉及阻塞操作，但为了扩展可以自选gevent池和多线程池两种模型控制。
 
-2. 爬虫相关选项说明：
+2, 爬虫相关选项说明：
 
 >
 * concurrent_num    : 并行crawler和fetcher数量
