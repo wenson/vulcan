@@ -19,12 +19,13 @@ A dynamic spider framework based on gevent and multi-threads,support webkit engi
 
 ### 依赖
 
-* python 2.7+
-* gevent 1.0
-* lxml 2.3 (for static parsing)
-* chardet 2.2.1
-* requests 1.2.3
-* splinter 0.6.0 (webkit framework for dynamic parsing)
+* python 2.7+ (must)
+* gevent 1.0  (must)
+* lxml 2.3 (must,for static parsing)
+* chardet 2.2.1 (must)
+* requests 1.2.3 (must)
+* splinter 0.6.0 (optional,webkit framework for dynamic parsing)
+* phantomjs 1.9 (optional,webkit engine)
 
 ### 说明
 
