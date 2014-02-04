@@ -21,10 +21,10 @@ A dynamic spider framework based on gevent and multi-threads,support webkit engi
 
 * python 2.7+
 * gevent 1.0
-* lxml 2.3
+* lxml 2.3 (for static parsing)
 * chardet 2.2.1
 * requests 1.2.3
-
+* splinter 0.6.0 (webkit framework for dynamic parsing)
 
 ### 说明
 
@@ -47,6 +47,7 @@ fetcher和crawler两部分独立工作，互不干扰，通过queue进行链接�
 * spider_timeout    : 爬虫超时时间
 * crawler_mode      : 爬取器模型(0:多线程模型,1:gevent模型)
 * same_origin       : 是否限制相同域下
+* dynamic_parse     : 是否使用WebKit动态解析
 
 
 ### 示例
