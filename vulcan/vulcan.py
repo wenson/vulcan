@@ -24,50 +24,67 @@ from gevent import event
 from gevent import Timeout
 from gevent import threadpool
 
-from lxml import etree
 from exceptions import *
 
 monkey.patch_all()
+import sys
 import time
 import uuid
-import urllib2
 import string
 import urlparse
 import logging
 import random
 
-import lxml.html as H
+import requests
 import chardet
 
 from Data import UrlCache,UrlData
+from utils import HtmlAnalyzer
 
-class HtmlAnalyzer(object):
-    '''页面分析类'''
-    @staticmethod
-    def extract_links(html,base_ref,tags=[]):
-        '''
-        抓取页面内链接(生成器)
-        base_ref : 用于将页面中的相对地址转换为绝对地址
-        tags     : 期望从该列表所指明的标签中提取链接
-        '''
-        if not html.strip():
-            return
-            
-        link_list = []
-        try:
-            doc = H.document_fromstring(html)
-        except Exception,e:
-            return
-            
-        default_tags = ['a','img','iframe','frame']
-        default_tags.extend(tags)
-        default_tags = list(set(default_tags))
-        doc.make_links_absolute(base_ref)
-        links_in_doc = doc.iterlinks()
-        for link in links_in_doc:
-            if link[0].tag in set(default_tags):
-                yield link[2]
-                
+try:
+    from utils import WebKit
+except Exception,e:
+    pass
+
+def monkey_patch():
+    '''
+    requests库中文乱码补丁
+    '''
+    prop = requests.models.Response.content
+    def content(self):
+        _content = prop.fget(self)
+        if self.encoding == 'ISO-8859-1':
+            encodings = requests.utils.get_encodings_from_content(_content)
+            if encodings:
+                self.encoding = encodings[0]
+            else:
+                self.encoding = self.apparent_encoding
+            _content = _content.decode(self.encoding, 'replace').encode('utf8', 'replace')
+            self._content = _content
+        return _content
+    requests.models.Response.content = property(content)
+
+monkey_patch()
+
+def to_unicode(data, charset=None):
+    '''
+    将输入的字符串转化为unicode对象
+    '''
+    unicode_data = ''
+    if isinstance(data,str):
+        if not charset:
+            try:
+                charset = chardet.detect(data).get('encoding')
+            except Exception,e:
+                pass
+        if charset:
+            unicode_data = data.decode(charset,'ignore')
+        else:
+            unicode_data = data
+    else:
+        unicode_data = data
+    return unicode_data
+
 
 class Fetcher(Greenlet):
     """抓取器(下载器)类"""
@@ -90,7 +107,9 @@ class Fetcher(Greenlet):
             try:
                 url_data = self.fetcher_queue.get(block=False)
             except queue.Empty,e:
-                if self.crawler_queue.unfinished_tasks == 0 and self.fetcher_queue.unfinished_tasks == 0:
+                if self.spider.crawler_stopped.isSet() and self.fetcher_queue.unfinished_tasks == 0:
+                    self.spider.stop()
+                elif self.crawler_queue.unfinished_tasks == 0 and self.fetcher_queue.unfinished_tasks == 0:
                     self.spider.stop()
                 else:
                     gevent.sleep()
@@ -98,10 +117,14 @@ class Fetcher(Greenlet):
                 if not url_data.html:
                     try:
                         if url_data not in self.crawler_cache:
-                            self.logger.info("fetcher %s accept %s" % (self.fetcher_id,url_data))
                             html = self._open(url_data)
+                            if not html.strip():
+                                self.spider.fetcher_queue.task_done()
+                                continue
+                            self.logger.info("fetcher %s accept %s" % (self.fetcher_id,url_data))
                             url_data.html = html
-                            self.crawler_queue.put(url_data,block=True)
+                            if not self.spider.crawler_stopped.isSet():
+                                self.crawler_queue.put(url_data,block=True)
                             self.crawler_cache.insert(url_data)
                     except Exception,e:
                         pass
@@ -111,16 +134,23 @@ class Fetcher(Greenlet):
         '''
         获取HTML内容
         '''
+        human_headers = {
+            'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.76 Safari/537.36',
+            'Accept-Encoding':'gzip,deflate,sdch'
+        }
         try:
-            req = urllib2.Request(str(url))
-            resp = urllib2.urlopen(req)
-        except (urllib2.URLError,urllib2.HTTPError),e:
+            r = requests.get(str(url), headers=human_headers)
+        except Exception,e:
             self.logger.warn("%s %s" % (self.url,str(e)))
-            return ''
+            return u''
         else:
-            html = resp.read()
-            resp.close()
-            return html
+            if r.headers.get('content-type','').find('text/html') >= 0:
+                html = r.content
+                html = html.decode('utf-8','ignore')
+                return html
+            else:
+                return u''
     
     def _run(self):
         self._fetcher()
@@ -131,7 +161,8 @@ class Spider(object):
     logger = logging.getLogger("spider")
         
     def __init__(self, concurrent_num=20, crawl_tags=[], depth=3, 
-                 max_url_num=300, internal_timeout=60, spider_timeout=6*3600, crawler_mode=0, same_origin=True):
+                 max_url_num=300, internal_timeout=60, spider_timeout=6*3600, 
+                 crawler_mode=0, same_origin=True, dynamic_parse=False):
         """
         concurrent_num    : 并行crawler和fetcher数量
         crawl_tags        : 爬行时收集URL所属标签列表
@@ -141,6 +172,7 @@ class Spider(object):
         spider_timeout    : 爬虫超时时间
         crawler_mode      : 爬取器模型(0:多线程模型,1:gevent模型)
         same_origin       : 是否限制相同域下
+        dynamic_parse     : 是否使用WebKit动态解析
         """
         
         self.logger.setLevel(logging.DEBUG)
@@ -159,8 +191,11 @@ class Spider(object):
             self.crawler_pool = threadpool.ThreadPool(min(50,self.concurrent_num))
         else:
             self.crawler_pool = pool.Pool(self.concurrent_num)
-        self.fetcher_queue = queue.JoinableQueue(maxsize=self.concurrent_num*100)
-        self.crawler_queue = queue.JoinableQueue(maxsize=self.concurrent_num*100)
+            
+        #self.fetcher_queue = queue.JoinableQueue(maxsize=self.concurrent_num*100)
+        self.fetcher_queue = threadpool.Queue(maxsize=self.concurrent_num*100)
+        self.crawler_queue = threadpool.Queue(maxsize=self.concurrent_num*100)
+        
         self.fetcher_cache = UrlCache()
         self.crawler_cache = UrlCache()
         
@@ -170,6 +205,10 @@ class Spider(object):
         self.same_origin = same_origin
         self.depth = depth
         self.max_url_num = max_url_num
+        self.dynamic_parse = dynamic_parse
+        if self.dynamic_parse:
+            self.webkit = WebKit()
+        self.crawler_stopped = event.Event()
     
     def _start_fetcher(self):
         '''
@@ -191,6 +230,7 @@ class Spider(object):
         主启动函数
         '''
         self.logger.info("spider starting...")
+        
         if self.crawler_mode == 0:
             self.logger.info("crawler run in multi-thread mode.")
         elif self.crawler_mode == 1:
@@ -214,6 +254,8 @@ class Spider(object):
             self.internal_timer.cancel()
             
         self.stopped.clear()
+        if self.dynamic_parse:
+            self.webkit.close()
         self.logger.info("crawler_cache:%s fetcher_cache:%s" % (len(self.crawler_cache),len(self.fetcher_cache)))
         self.logger.info("spider process quit.")
     
@@ -221,7 +263,7 @@ class Spider(object):
         '''
         爬行器主函数
         '''
-        while not self.stopped.isSet():
+        while not self.stopped.isSet() and not self.crawler_stopped.isSet():
             try:
                 self._maintain_spider() #维护爬虫池
                 url_data = self.crawler_queue.get(block=False)
@@ -235,35 +277,54 @@ class Spider(object):
                 pre_depth = url_data.depth
                 curr_depth = pre_depth+1
                 link_generator = HtmlAnalyzer.extract_links(url_data.html,url_data.url,self.crawl_tags)
-                for index,link in enumerate(link_generator):
-                    if link in self.fetcher_cache:
+                link_list = [ url for url in link_generator]
+                if self.dynamic_parse:
+                    link_generator = self.webkit.extract_links(url_data.url)
+                    link_list.extend([ url for url in link_generator])
+                link_list = list(set(link_list))
+                for index,link in enumerate(link_list):
+                    if not self.check_url_usable(link):
                         continue
-                        
-                    if not link.startswith("http"):
-                        continue
-                    
-                    if self.same_origin:
-                        if not self._check_same_origin(link):
-                            continue
-                    
                     if curr_depth > self.depth:   #最大爬行深度判断
-                        continue
+                        if self.crawler_stopped.isSet():
+                            break
+                        else:
+                            self.crawler_stopped.set()
+                            break
                     
                     if len(self.fetcher_cache) == self.max_url_num:   #最大收集URL数量判断
-                        continue
-                    
-                    link = self._to_unicode(link)
+                        if self.crawler_stopped.isSet():
+                            break
+                        else:
+                            self.crawler_stopped.set()
+                            break
+                    link = to_unicode(link)
                     url = UrlData(link,depth=curr_depth)
                     self.fetcher_cache.insert(url)
                     self.fetcher_queue.put(url,block=True)
                 self.crawler_queue.task_done()
-                                    
+    
+    def check_url_usable(self,link):
+        '''
+        检查URL是否符合可用规则
+        '''
+        if link in self.fetcher_cache:
+            return False
+            
+        if not link.startswith("http"):
+            return False
+        
+        if self.same_origin:
+            if not self._check_same_origin(link):
+                return False
+        return True
+
     def feed_url(self,url):
         '''
         设置初始爬取URL
         '''
         if isinstance(url,basestring):
-            url = self._to_unicode(url)
+            url = to_unicode(url)
             url = UrlData(url)
             
         if self.same_origin:
@@ -277,21 +338,6 @@ class Spider(object):
         终止爬虫
         '''
         self.stopped.set()
-    
-    def _to_unicode(self,data):
-        '''
-        将输入的字符串转化为unicode对象
-        '''
-        unicode_data = ''
-        if isinstance(data,str):
-            charset = chardet.detect(data).get('encoding')
-            if charset:
-                unicode_data = data.decode(charset)
-            else:
-                unicode_data = data
-        else:
-            unicode_data = data
-        return unicode_data
         
     def _maintain_spider(self):
         '''
@@ -318,12 +364,13 @@ class Spider(object):
         '''
         检查两个URL是否同源
         '''
-        current_url = self._to_unicode(current_url)
+        current_url = to_unicode(current_url)
         url_part = urlparse.urlparse(current_url)
         url_origin = (url_part.scheme,url_part.netloc)
         return url_origin == self.origin
 
 if __name__ == '__main__':
-    spider = Spider(concurrent_num=10,depth=3,max_url_num=300,crawler_mode=0)
-    spider.feed_url("http://www.freebuf.com/")
+    spider = Spider(concurrent_num=10,depth=5,max_url_num=300,crawler_mode=1,dynamic_parse=False)
+    url = sys.argv[1]
+    spider.feed_url(url)
     spider.start()
