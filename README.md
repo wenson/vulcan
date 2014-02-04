@@ -1,6 +1,6 @@
 Vulcan Spider
 ======
-A spider framework based on gevent and multi-threads,support webkit for dom parsing.
+A spider use gevent and multi-thread module,support webkit for dom parsing.
 
 基于gevent和多线程模型，支持WebKit引擎的动态爬虫框架。
 
