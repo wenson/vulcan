@@ -23,6 +23,7 @@ A dynamic spider framework based on gevent and multi-threads,support webkit engi
 * gevent 1.0
 * lxml 2.3
 * chardet 2.2.1
+* requests 1.2.3
 
 
 ### 说明
